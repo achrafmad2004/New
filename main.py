@@ -8,9 +8,9 @@ class BalatroSession:
     def __init__(self):
         self.reader = None
         self.writer = None
-        self.client_ws = None  # WebSocket from the proxy
+        self.client_ws = None
 
-    async def connect(self):
+    async def connect_to_balatro(self):
         self.reader, self.writer = await asyncio.open_connection(BALATRO_HOST, BALATRO_PORT)
         print("[Relay] Connected to Balatro server")
 
@@ -44,14 +44,14 @@ class BalatroSession:
             self.client_ws = None
         return ws
 
-balatro_session = BalatroSession()
+relay = BalatroSession()
 
-async def start_background_tasks(app):
-    await balatro_session.connect()
-    app['balatro_task'] = asyncio.create_task(balatro_session.read_from_balatro())
+async def startup(app):
+    await relay.connect_to_balatro()
+    app['relay_to_balatro'] = asyncio.create_task(relay.read_from_balatro())
 
 app = web.Application()
-app.router.add_get('/ws', balatro_session.handle_client)
-app.on_startup.append(start_background_tasks)
+app.router.add_get("/ws", relay.handle_client)
+app.on_startup.append(startup)
 
 web.run_app(app, port=8000)
