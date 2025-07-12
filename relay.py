@@ -1,49 +1,46 @@
-### Directory: balatro-relay-persistent
-
-# ================================
-# File: relay.py (Railway - Cloud)
-# ================================
-
 import socket
 import threading
 import time
 
+# === CONFIG ===
 SERVER_HOST = "161.35.252.15"
 SERVER_PORT = 8788
 RELAY_PORT = 20001
-
 USERNAME = "Achraf~1"
 VERSION = "0.2.11-MULTIPLAYER"
 
-sessions = {}
-
+# === HELPERS ===
 
 def generate_encrypt_id():
     base = 45385400000
     t = int(time.time() * 1000)
-    return f"{base + (t % 100000)}.263"
+    simulated_id = base + (t % 100000)
+    return f"{simulated_id}.263"
 
-
-def build_mod_hash(eid):
+def build_mod_hash(encrypt_id):
     return (
-        f"theOrder=true;unlocked=true;encryptID={eid};serversideConnectionID=423bca98;"
-        f"FantomsPreview=2.3.0;Multiplayer={VERSION};Saturn=0.2.2-E-ALPHA;"
-        f"Steamodded-1.0.0~BETA-0614a;TheOrder-MultiplayerIntegration"
+        f"theOrder=true;"
+        f"unlocked=true;"
+        f"encryptID={encrypt_id};"
+        f"serversideConnectionID=423bca98;"
+        f"FantomsPreview=2.3.0;"
+        f"Multiplayer={VERSION};"
+        f"Saturn=0.2.2-E-ALPHA;"
+        f"Steamodded-1.0.0~BETA-0614a;"
+        f"TheOrder-MultiplayerIntegration"
     )
-
 
 def send_keep_alive_loop(sock):
     while True:
         try:
             sock.sendall(b"action:keepAliveAck\n")
-            print("[KA] Sent keepAliveAck")
+            print("[✓] Sent keepAliveAck")
             time.sleep(4)
         except Exception as e:
             print(f"[X] Keep-alive error: {e}")
             break
 
-
-def handle_proxy(proxy_sock, balatro_sock):
+def relay_handler(client_sock, server_sock):
     def forward(src, dst, label):
         try:
             while True:
@@ -53,106 +50,57 @@ def handle_proxy(proxy_sock, balatro_sock):
                 print(f"[{label}] {data}")
                 dst.sendall(data)
         except Exception as e:
-            print(f"[X] Forwarding error ({label}): {e}")
+            print(f"[X] Relay error ({label}): {e}")
         finally:
-            print(f"[~] Closed {label}")
-            src.close()
-            dst.close()
+            try:
+                src.close()
+                dst.close()
+            except:
+                pass
 
-    threading.Thread(target=forward, args=(proxy_sock, balatro_sock, "Proxy → Server")).start()
-    threading.Thread(target=forward, args=(balatro_sock, proxy_sock, "Server → Proxy")).start()
+    threading.Thread(target=forward, args=(client_sock, server_sock, "Proxy → Server")).start()
+    threading.Thread(target=forward, args=(server_sock, client_sock, "Server → Proxy")).start()
 
+# === MAIN ===
 
 def main():
     print("[Relay] Relay bot starting...")
-
     try:
         print(f"[Relay] Connecting to Balatro server at {SERVER_HOST}:{SERVER_PORT}...")
-        balatro_sock = socket.create_connection((SERVER_HOST, SERVER_PORT))
-        print("[Relay] Connected to Balatro server")
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect((SERVER_HOST, SERVER_PORT))
+        print("[Relay] Connected to Balatro server.")
 
-        eid = generate_encrypt_id()
-        mod_hash = build_mod_hash(eid)
+        encrypt_id = generate_encrypt_id()
+        mod_hash = build_mod_hash(encrypt_id)
 
-        print(f"[Relay] encryptID = {eid}")
-        print("[Relay] Sending handshake to Balatro")
-        balatro_sock.sendall(f"action:username,username:{USERNAME},modHash:\n".encode())
-        balatro_sock.sendall(f"action:version,version:{VERSION}\n".encode())
-        balatro_sock.sendall(f"action:username,username:{USERNAME},modHash:{mod_hash}\n".encode())
-        print("[Relay] Handshake sent")
+        print(f"[Relay] encryptID = {encrypt_id}")
+        print("[Relay] Sending handshake...")
+        s.sendall(f"action:username,username:{USERNAME},modHash:\n".encode())
+        s.sendall(f"action:version,version:{VERSION}\n".encode())
+        s.sendall(f"action:username,username:{USERNAME},modHash:{mod_hash}\n".encode())
+        print("[Relay] Handshake sent.")
 
-        threading.Thread(target=send_keep_alive_loop, args=(balatro_sock,), daemon=True).start()
+        threading.Thread(target=send_keep_alive_loop, args=(s,), daemon=True).start()
 
-        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        listener.bind(("0.0.0.0", RELAY_PORT))
-        listener.listen(1)
+        relay_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        relay_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        relay_sock.bind(("0.0.0.0", RELAY_PORT))
+        relay_sock.listen(1)
+
         print(f"[Relay] Listening for proxy on port {RELAY_PORT}...")
 
         while True:
-            proxy_sock, addr = listener.accept()
+            client_sock, addr = relay_sock.accept()
             print(f"[Relay] Proxy connected from {addr}")
-            handle_proxy(proxy_sock, balatro_sock)
+            relay_handler(client_sock, s)
 
     except Exception as e:
-        print(f"[Relay] Error: {e}")
-
+        print(f"[X] Relay error: {e}")
 
 if __name__ == "__main__":
     main()
 
-
-# =====================================
-# File: requirements.txt (for Railway)
-# =====================================
-
-# Nothing required beyond stdlib, but Railway expects this file
-
-
-# ========================
-# File: railway.json
-# ========================
-{
-  "build": {
-    "env": {
-      "PYTHONUNBUFFERED": "1"
-    }
-  },
-  "services": {
-    "relay": {
-      "port": 20001,
-      "protocol": "tcp"
-    }
-  }
-}
-
-
-# ========================
-# File: README.md
-# ========================
-
-# Balatro Persistent Relay (Railway)
-
-This repository hosts a Railway-compatible TCP relay that maintains a persistent connection to the Balatro multiplayer server, even when the proxy (on your local PC) disconnects temporarily.
-
-## Features
-- Persistent TCP connection to Balatro server
-- Waits for reconnecting proxy
-- Sends regular keep-alive ACKs
-- Logs traffic to and from the Balatro server
-
-## Usage
-
-1. Deploy this repo to [Railway](https://railway.app/)
-2. Set TCP service port to `20001`
-3. Point your proxy (on your PC) to `your-app-name.proxy.rlwy.net:20001`
-4. Run Balatro through the proxy
-
-## Files
-- `relay.py`: the cloud relay logic
-- `requirements.txt`: empty, just for compatibility
-- `railway.json`: configures TCP port for Railway
-
----
-
-You can now add the local files separately:
-- `proxy.py` and `launcher.py` will stay **on your PC only**.
+# This repository hosts a Railway-compatible TCP relay that maintains a persistent
+# connection to the Balatro multiplayer server, even when the proxy (on your local PC)
+# disconnects temporarily.
