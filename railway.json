@@ -4,6 +4,7 @@
       "PYTHONUNBUFFERED": "1"
     }
   },
+  "start": "python3 relay.py",
   "services": {
     "relay": {
       "port": 20001,
