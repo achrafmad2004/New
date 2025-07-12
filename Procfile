@@ -1,1 +1,1 @@
-python3 relay.py
+web: python3 relay.py
