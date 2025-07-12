@@ -32,8 +32,10 @@ class BalatroRelay:
                 if not data:
                     print("[Relay] Balatro server disconnected")
                     break
+                print(f"[Relay] Received {len(data)} bytes from Balatro server")
                 if self.client_ws:
                     await self.client_ws.send_bytes(data)
+                    print("[Relay] Sent data to proxy")
         except Exception as e:
             print("[Relay] Error reading from Balatro:", e)
 
@@ -49,6 +51,7 @@ class BalatroRelay:
                     print(f"[Relay] Received {len(msg.data)} bytes from proxy")
                     self.writer.write(msg.data)
                     await self.writer.drain()
+                    print("[Relay] Sent data to Balatro server")
         except Exception as e:
             print("[Relay] WebSocket error:", e)
         finally:
