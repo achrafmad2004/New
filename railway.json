@@ -1,14 +1,8 @@
 {
   "build": {
-    "env": {
-      "PYTHONUNBUFFERED": "1"
-    }
+    "builder": "NIXPACKS"
   },
-  "start": "python3 relay.py",
-  "services": {
-    "relay": {
-      "port": 20001,
-      "protocol": "tcp"
-    }
+  "deploy": {
+    "startCommand": "python3 relay.py"
   }
 }
