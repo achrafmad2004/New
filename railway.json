@@ -1,0 +1,13 @@
+{
+  "build": {
+    "env": {
+      "PYTHONUNBUFFERED": "1"
+    }
+  },
+  "services": {
+    "relay": {
+      "port": 20001,
+      "protocol": "tcp"
+    }
+  }
+}
