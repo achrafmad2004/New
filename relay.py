@@ -1,101 +1,94 @@
-# === RELAY SCRIPT (WebSocket Listener + TCP Tunnel to Balatro) ===
-# File: relay.py
-
 import asyncio
 import websockets
 import socket
 import threading
 import time
 
+# === CONFIG ===
 BALATRO_HOST = "161.35.252.15"
 BALATRO_PORT = 8788
 RELAY_PORT = 20001
 USERNAME = "Achraf~1"
 VERSION = "0.2.11-MULTIPLAYER"
 
-# Persistent TCP connection to Balatro server
-balatro_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-connected_to_proxy = False
-
-
+# === CONNECTION TO BALATRO SERVER (TCP) ===
 def generate_encrypt_id():
     base = 45385400000
     t = int(time.time() * 1000)
     simulated_id = base + (t % 100000)
     return f"{simulated_id}.263"
 
-
 def build_mod_hash(encrypt_id):
     return (
-        f"theOrder=true;unlocked=true;encryptID={encrypt_id};"
-        f"serversideConnectionID=423bca98;FantomsPreview=2.3.0;"
-        f"Multiplayer={VERSION};Saturn=0.2.2-E-ALPHA;"
-        f"Steamodded-1.0.0~BETA-0614a;TheOrder-MultiplayerIntegration"
+        f"theOrder=true;"
+        f"unlocked=true;"
+        f"encryptID={encrypt_id};"
+        f"serversideConnectionID=423bca98;"
+        f"FantomsPreview=2.3.0;"
+        f"Multiplayer={VERSION};"
+        f"Saturn=0.2.2-E-ALPHA;"
+        f"Steamodded-1.0.0~BETA-0614a;"
+        f"TheOrder-MultiplayerIntegration"
     )
 
-
-def send_keepalive():
-    while True:
-        try:
-            balatro_socket.sendall(b"action:keepAliveAck\n")
-            print("[✓] Sent keepAliveAck")
-            time.sleep(4)
-        except Exception as e:
-            print(f"[X] Keep-alive error: {e}")
-            break
-
-
-def handle_relay(proxy_ws):
-    try:
-        while True:
-            data = balatro_socket.recv(4096)
-            if not data:
-                break
-            asyncio.run(proxy_ws.send(data))
-    except Exception as e:
-        print(f"[X] Relay error (Balatro → Proxy): {e}")
-
-
-async def proxy_handler(websocket):
-    global connected_to_proxy
-    print("[Relay] Proxy connected via WebSocket")
-    connected_to_proxy = True
-
-    try:
-        while True:
-            data = await websocket.recv()
-            print(f"[Proxy → Balatro] {data!r}")
-            balatro_socket.sendall(data)
-    except Exception as e:
-        print(f"[X] WebSocket receive error: {e}")
-    finally:
-        connected_to_proxy = False
-        print("[Relay] Proxy disconnected")
-
-
-async def main():
-    print("[Relay] Relay bot starting...")
-    print(f"[Relay] Connecting to Balatro server at {BALATRO_HOST}:{BALATRO_PORT}...")
-    balatro_socket.connect((BALATRO_HOST, BALATRO_PORT))
-    print("[Relay] Connected to Balatro server.")
-
+def connect_to_balatro():
+    print("[Relay] Connecting to Balatro server...")
+    sock = socket.create_connection((BALATRO_HOST, BALATRO_PORT))
     encrypt_id = generate_encrypt_id()
     mod_hash = build_mod_hash(encrypt_id)
 
-    print(f"[Relay] encryptID = {encrypt_id}")
-    print("[Relay] Sending handshake...")
-    balatro_socket.sendall(f"action:username,username:{USERNAME},modHash:\n".encode())
-    balatro_socket.sendall(f"action:version,version:{VERSION}\n".encode())
-    balatro_socket.sendall(f"action:username,username:{USERNAME},modHash:{mod_hash}\n".encode())
-    print("[Relay] Handshake sent.")
+    sock.sendall(f"action:username,username:{USERNAME},modHash:\n".encode())
+    sock.sendall(f"action:version,version:{VERSION}\n".encode())
+    sock.sendall(f"action:username,username:{USERNAME},modHash:{mod_hash}\n".encode())
+    print(f"[Relay] Handshake complete. encryptID={encrypt_id}")
 
-    threading.Thread(target=send_keepalive, daemon=True).start()
-    threading.Thread(target=handle_relay, args=(None,), daemon=True).start()
+    def keep_alive_loop():
+        while True:
+            try:
+                sock.sendall(b"action:keepAliveAck\n")
+                print("[✓] Sent keepAliveAck")
+                time.sleep(4)
+            except Exception as e:
+                print(f"[Relay] Keep-alive failed: {e}")
+                break
 
-    print(f"[Relay] Listening for proxy on port {RELAY_PORT}...")
-    async with websockets.serve(proxy_handler, host="0.0.0.0", port=RELAY_PORT):
+    threading.Thread(target=keep_alive_loop, daemon=True).start()
+    return sock
+
+balatro_sock = connect_to_balatro()
+
+# === RELAY HANDLER (WebSocket <-> TCP) ===
+async def relay_handler(websocket):
+    print("[Relay] Proxy connected.")
+    try:
+        async def recv_ws_and_send_tcp():
+            while True:
+                data = await websocket.recv()
+                print(f"[WS → TCP] {data[:100]!r}")
+                balatro_sock.sendall(data.encode())
+
+        def recv_tcp_and_send_ws():
+            try:
+                while True:
+                    data = balatro_sock.recv(4096)
+                    if not data:
+                        break
+                    print(f"[TCP → WS] {data[:100]!r}")
+                    asyncio.run(websocket.send(data.decode()))
+            except Exception as e:
+                print(f"[Relay] TCP → WS error: {e}")
+
+        threading.Thread(target=recv_tcp_and_send_ws, daemon=True).start()
+        await recv_ws_and_send_tcp()
+
+    except Exception as e:
+        print(f"[Relay] Proxy connection failed: {e}")
+
+# === START SERVER ===
+async def main():
+    print(f"[Relay] Listening on port {RELAY_PORT} (WebSocket)...")
+    async with websockets.serve(relay_handler, "0.0.0.0", RELAY_PORT):
         await asyncio.Future()  # Run forever
-
 
 if __name__ == "__main__":
     asyncio.run(main())
