@@ -1,30 +1,8 @@
 import asyncio
 from aiohttp import web
-import time
 
 BALATRO_HOST = "balatro.virtualized.dev"
 BALATRO_PORT = 8788
-USERNAME = "Achraf~1"
-VERSION = "0.2.11-MULTIPLAYER"
-
-def generate_encrypt_id():
-    base = 45385400000
-    t = int(time.time() * 1000)
-    simulated_id = base + (t % 100000)
-    return f"{simulated_id}.263"
-
-def build_mod_hash(encrypt_id):
-    return (
-        f"theOrder=true;"
-        f"unlocked=true;"
-        f"encryptID={encrypt_id};"
-        f"serversideConnectionID=423bca98;"
-        f"FantomsPreview=2.3.0;"
-        f"Multiplayer={VERSION};"
-        f"Saturn=0.2.2-E-ALPHA;"
-        f"Steamodded-1.0.0~BETA-0614a;"
-        f"TheOrder-MultiplayerIntegration"
-    )
 
 class BalatroRelay:
     def __init__(self):
@@ -35,20 +13,7 @@ class BalatroRelay:
     async def connect_to_balatro(self):
         self.reader, self.writer = await asyncio.open_connection(BALATRO_HOST, BALATRO_PORT)
         print("[Relay] Connected to Balatro server")
-        await self.send_handshake()
         asyncio.create_task(self.send_keep_alive())
-
-    async def send_handshake(self):
-        encrypt_id = generate_encrypt_id()
-        mod_hash = build_mod_hash(encrypt_id)
-
-        print(f"[Relay] encryptID = {encrypt_id}")
-        print("[Relay] Sending handshake to Balatro")
-        self.writer.write(f"action:username,username:{USERNAME},modHash:\n".encode())
-        self.writer.write(f"action:version,version:{VERSION}\n".encode())
-        self.writer.write(f"action:username,username:{USERNAME},modHash:{mod_hash}\n".encode())
-        await self.writer.drain()
-        print("[Relay] Handshake sent")
 
     async def send_keep_alive(self):
         try:
