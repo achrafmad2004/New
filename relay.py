@@ -1,8 +1,7 @@
 # relay.py
-import socket
-import threading
 import asyncio
 import websockets
+import socket
 import traceback
 
 BALATRO_HOST = "161.35.252.15"
@@ -12,42 +11,38 @@ DEBUG = True
 def log(prefix, msg):
     print(f"[{prefix}] {msg}")
 
-def forward_tcp_to_ws(tcp_sock, websocket):
+async def handle_connection(websocket):
+    log("+", f"Proxy connected via WebSocket")
     try:
-        while True:
-            data = tcp_sock.recv(4096)
-            if not data:
-                log("-", "Balatro server closed connection")
-                break
-            if DEBUG:
-                log("→", f"To Proxy: {len(data)} bytes")
-            asyncio.run(websocket.send(data))
-    except Exception as e:
-        log("X", f"Error TCP→WS: {e}")
-        traceback.print_exc()
-    finally:
-        asyncio.run(websocket.close())
-        tcp_sock.close()
-
-async def forward_ws_to_tcp(websocket, tcp_sock):
-    try:
-        async for data in websocket:
-            if DEBUG:
-                log("←", f"To Server: {len(data)} bytes")
-            tcp_sock.sendall(data)
-    except Exception as e:
-        log("X", f"Error WS→TCP: {e}")
-        traceback.print_exc()
-    finally:
-        tcp_sock.close()
-
-async def handler(websocket, path):
-    log("+", "Proxy connected via WebSocket")
-    try:
-        tcp_sock = socket.create_connection((BALATRO_HOST, BALATRO_PORT))
+        reader, writer = await asyncio.open_connection(BALATRO_HOST, BALATRO_PORT)
         log("+", f"Connected to Balatro server at {BALATRO_HOST}:{BALATRO_PORT}")
-        threading.Thread(target=forward_tcp_to_ws, args=(tcp_sock, websocket), daemon=True).start()
-        await forward_ws_to_tcp(websocket, tcp_sock)
+
+        async def tcp_to_ws():
+            try:
+                while True:
+                    data = await reader.read(4096)
+                    if not data:
+                        log("-", "Balatro server closed connection")
+                        break
+                    if DEBUG:
+                        log("→", f"Server → Proxy: {len(data)} bytes")
+                    await websocket.send(data)
+            except Exception as e:
+                log("X", f"Error [Server → Proxy]: {e}")
+                traceback.print_exc()
+
+        async def ws_to_tcp():
+            try:
+                async for message in websocket:
+                    if DEBUG:
+                        log("←", f"Proxy → Server: {len(message)} bytes")
+                    writer.write(message)
+                    await writer.drain()
+            except Exception as e:
+                log("X", f"Error [Proxy → Server]: {e}")
+                traceback.print_exc()
+
+        await asyncio.gather(tcp_to_ws(), ws_to_tcp())
 
     except Exception as e:
         log("X", f"Relay handler error: {e}")
@@ -55,7 +50,7 @@ async def handler(websocket, path):
 
 async def main():
     log("*", "Relay listening on :20001")
-    async with websockets.serve(handler, "0.0.0.0", 20001, max_size=None):
-        await asyncio.Future()  # run forever
+    async with websockets.serve(handle_connection, "0.0.0.0", 20001, max_size=None):
+        await asyncio.Future()
 
 asyncio.run(main())
